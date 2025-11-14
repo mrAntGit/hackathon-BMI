@@ -1,0 +1,33 @@
+import numpy as np
+
+def get_top_channels(grouped, position_idx=0, percent_keep=20, metric='mean'):
+    """
+    Returns a ranked list of channel indices and the selected top channels.
+    """
+    neural_data = grouped['neural'][position_idx]  # (trials, time, channels)
+    _, _, n_channels = neural_data.shape
+
+    # ---- Compute per-channel scores ----
+    if metric == 'mean':
+        scores = neural_data.mean(axis=(0, 1))  # shape (channels,)
+    elif metric == 'var':
+        scores = neural_data.var(axis=(0, 1))
+    else:
+        raise ValueError("Unknown metric")
+
+    # ---- Rank channels high → low ----
+    ranked_channels = np.argsort(scores)[::-1]  # descending order
+
+    # ---- Select top X% ----
+    K = max(1, int((percent_keep / 100) * n_channels))
+    top_channels = ranked_channels[:K]
+
+    return ranked_channels, top_channels
+    
+ranked, top = get_top_channels(grouped, position_idx=0, percent_keep=20)
+
+print("Ranked Channels (best → worst):")
+print(ranked)
+
+print(f"\nTop {len(top)} Channels:")
+print(top)
