@@ -1,0 +1,69 @@
+from ipywidgets import interactive, IntSlider, fixed
+
+def plot_sbp_heatmaps_all_trials(grouped, position_idx=0):
+    """
+    Create individual heatmaps for each trial showing SBP across all channels over time
+    """
+    neural_data = grouped['neural'][position_idx]  # (trials, timepoints, channels)
+    n_trials, n_timepoints, n_channels = neural_data.shape
+    
+    # Calculate grid dimensions
+    n_cols = min(4, n_trials)  # Max 4 columns
+    n_rows = int(np.ceil(n_trials / n_cols))
+    
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(5*n_cols, 4*n_rows))
+    
+    # Flatten axes for easy indexing
+    if n_trials == 1:
+        axes = np.array([axes])
+    else:
+        axes = axes.flatten()
+    
+    # Find global min/max for consistent color scale
+    vmin = neural_data.min()
+    vmax = neural_data.max()
+    
+    for trial in range(n_trials):
+        ax = axes[trial]
+        
+        # Get data for this trial: (timepoints, channels)
+        trial_data = neural_data[trial, :, :]
+        
+        # Create heatmap (transpose to have channels on y-axis, time on x-axis)
+        im = ax.imshow(trial_data.T, aspect='auto', cmap='viridis', 
+                       vmin=vmin, vmax=vmax, interpolation='nearest')
+        
+        ax.set_title(f'Trial {trial}', fontweight='bold')
+        ax.set_xlabel('Time (bins)')
+        ax.set_ylabel('Channel')
+        
+        # Add colorbar for each subplot
+        plt.colorbar(im, ax=ax, label='SBP')
+    
+    # Hide extra subplots
+    for idx in range(n_trials, len(axes)):
+        axes[idx].axis('off')
+    
+    plt.suptitle(f'SBP Across All Trials - Position {position_idx}', 
+                 fontsize=16, fontweight='bold', y=0.995)
+    plt.tight_layout()
+    plt.show()
+
+# Determine number of positions
+n_positions = len(grouped['neural'])
+
+# Create interactive plot with just position slider
+interactive_plot1 = interactive(
+    plot_sbp_heatmaps_all_trials,
+    grouped=fixed(grouped),
+    position_idx=IntSlider(
+        min=0, 
+        max=n_positions - 1, 
+        step=1, 
+        value=0, 
+        description='Position:',
+        continuous_update=False
+    )
+)
+
+interactive_plot1
