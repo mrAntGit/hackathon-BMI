@@ -1,3 +1,5 @@
+#might need heatmap neural_data function
+
 import numpy as np
 
 def get_top_channels(grouped, position_idx=0, percent_keep=20, metric='mean'):
