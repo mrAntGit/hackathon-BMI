@@ -1,0 +1,117 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import r2_score
+
+# Get channels ranked from highest to lowest correlation
+channels_ranked = results_df_sorted['SBP_Channel'].values.astype(int)
+
+# Parameters
+hist = 6
+baseline_r2 = 0.32049  # Your reported baseline
+
+# Store results
+n_channels_removed = []
+r2_values = []
+
+print("Starting channel removal analysis...\n")
+
+# Try removing 0, 5, 10, 15, ... up to 90 channels
+for n_remove in range(0, 91, 5):
+    if n_remove == 0:
+        # Keep all channels
+        keep_channels = channels_ranked
+    else:
+        # Remove n_remove channels with lowest correlation (from the end)
+        keep_channels = channels_ranked[:-n_remove]
+    
+    # Filter neural data to keep only selected channels
+    neu_filtered = neu[:, keep_channels]
+    vel_filtered = vel  # Velocity data doesn't change
+    
+    # Add time history
+    adjneu = np.zeros((neu_filtered.shape[0]-hist, len(keep_channels), hist+1))
+    for h in range(hist+1):
+        adjneu[:,:,h] = neu_filtered[h:neu_filtered.shape[0]-hist+h,:]
+    adjneu = adjneu.reshape(adjneu.shape[0], -1)
+    adjvel = vel_filtered[hist:,:]
+    
+    # Separate training and test set (same split as original)
+    X_train, X_test, y_train, y_test = train_test_split(
+        adjneu, adjvel, test_size=0.2, shuffle=False
+    )
+    
+    # Train ridge regression
+    ridge = Ridge(alpha=0.001)
+    ridge.fit(X_train, y_train)
+    
+    # Test the ridge regression
+    yhat = ridge.predict(X_test)
+    r2 = ridge.score(X_test, y_test)
+    
+    # Store results
+    n_channels_removed.append(n_remove)
+    r2_values.append(r2)
+    
+    print(f"Removed {n_remove:2d} channels (kept {len(keep_channels):2d}): R² = {r2:.5f}")
+
+print("\n" + "="*60)
+
+# Create the figure
+fig, ax = plt.subplots(1, 1, figsize=(10, 6))
+
+# Plot R² vs channels removed
+ax.plot(n_channels_removed, r2_values, 'o-', linewidth=2, markersize=8, 
+        color='#2E86AB', label='R²')
+
+# Add baseline reference line (should match first point)
+actual_baseline = r2_values[0]
+ax.axhline(y=actual_baseline, color='r', linestyle='--', linewidth=2, 
+           label=f'Baseline R² = {actual_baseline:.5f}')
+
+# Add threshold lines (e.g., 90% and 95% of baseline)
+threshold_90 = actual_baseline * 0.90
+threshold_95 = actual_baseline * 0.95
+ax.axhline(y=threshold_90, color='orange', linestyle=':', linewidth=1.5, 
+           label=f'90% threshold = {threshold_90:.5f}')
+ax.axhline(y=threshold_95, color='green', linestyle=':', linewidth=1.5, 
+           label=f'95% threshold = {threshold_95:.5f}')
+
+# Labels and formatting
+ax.set_xlabel('Number of Channels Removed (Lowest Correlation)', fontsize=12)
+ax.set_ylabel('R² Value', fontsize=12)
+ax.set_title('Model Performance vs Channel Reduction', fontsize=14, fontweight='bold')
+ax.grid(True, alpha=0.3)
+ax.legend(loc='best', fontsize=10)
+
+# Add text annotation for optimal point (where R² crosses 90% threshold)
+try:
+    optimal_idx = np.where(np.array(r2_values) >= threshold_90)[0][-1]
+    optimal_n_remove = n_channels_removed[optimal_idx]
+    optimal_r2 = r2_values[optimal_idx]
+    ax.plot(optimal_n_remove, optimal_r2, 'r*', markersize=20)
+    ax.annotate(f'Optimal\n{optimal_n_remove} removed\nR²={optimal_r2:.5f}', 
+                xy=(optimal_n_remove, optimal_r2), 
+                xytext=(optimal_n_remove+10, optimal_r2-0.01),
+                arrowprops=dict(arrowstyle='->', color='red', lw=2),
+                fontsize=10, color='red', fontweight='bold')
+except:
+    pass
+
+plt.tight_layout()
+plt.show()
+
+# Print summary
+print("\n=== Summary ===")
+print(f"Baseline R² (all 96 channels): {actual_baseline:.5f}")
+print(f"Best R² after removal: {max(r2_values):.5f} ({n_channels_removed[np.argmax(r2_values)]} channels removed)")
+print(f"Worst R² after removal: {min(r2_values):.5f} ({n_channels_removed[np.argmin(r2_values)]} channels removed)")
+
+# Find how many can be removed while staying above thresholds
+for threshold_name, threshold_val in [("95%", threshold_95), ("90%", threshold_90)]:
+    valid_indices = [i for i, r2 in enumerate(r2_values) if r2 >= threshold_val]
+    if valid_indices:
+        max_removable = n_channels_removed[valid_indices[-1]]
+        remaining = 96 - max_removable
+        print(f"Can remove up to {max_removable} channels (keep {remaining}) while staying above {threshold_name} threshold")

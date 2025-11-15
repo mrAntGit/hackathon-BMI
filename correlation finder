@@ -1,0 +1,108 @@
+import numpy as np
+from scipy import stats
+import pandas as pd
+import pandas as pd
+pd.set_option('display.max_rows', None)
+# Assume data dictionary is already loaded
+# data = your loaded dictionary with keys: 'neural', 'behavior', etc.
+
+# Extract neural (SBP) and velocity data
+neu = data['neural']  # Nx96 array
+vel = data['behavior'][:, [2, 3]]  # Nx2 array (IDX_velocity, MRP_velocity)
+
+print(f"Neural data shape: {neu.shape}")
+print(f"Velocity data shape: {vel.shape}")
+
+# Calculate median velocity for splitting
+vel_combined = np.linalg.norm(vel, axis=1)  # Combined velocity magnitude
+median_vel = np.median(vel_combined)
+
+print(f"\nMedian velocity: {median_vel:.4f}")
+
+# Split data into high and low velocity groups
+high_vel_mask = vel_combined >= median_vel
+low_vel_mask = vel_combined < median_vel
+
+# Group neural data by velocity condition
+grouped = {'neural': [], 'behavior': []}
+grouped['neural'].append(neu[high_vel_mask])  # High velocity group
+grouped['neural'].append(neu[low_vel_mask])   # Low velocity group
+grouped['behavior'].append(vel[high_vel_mask])
+grouped['behavior'].append(vel[low_vel_mask])
+
+print(f"High velocity samples: {grouped['neural'][0].shape[0]}")
+print(f"Low velocity samples: {grouped['neural'][1].shape[0]}")
+
+# Calculate mean neural activity for each group and channel
+mean_neural_high = np.mean(grouped['neural'][0], axis=0)  # 96 channels
+mean_neural_low = np.mean(grouped['neural'][1], axis=0)   # 96 channels
+
+print(f"\nMean neural high shape: {mean_neural_high.shape}")
+print(f"Mean neural low shape: {mean_neural_low.shape}")
+
+# Get velocity values for each group
+vel_high = vel_combined[high_vel_mask]
+vel_low = vel_combined[low_vel_mask]
+
+# Run correlations for each channel
+results = []
+
+for channel in range(neu.shape[1]):
+    # Get neural data for this channel in high and low velocity conditions
+    high_vel_neural = grouped['neural'][0][:, channel]
+    low_vel_neural = grouped['neural'][1][:, channel]
+    
+    # Correlate neural activity with velocity within high velocity group
+    pearson_r_high, pearson_p_high = stats.pearsonr(high_vel_neural, vel_high)
+    spearman_r_high, spearman_p_high = stats.spearmanr(high_vel_neural, vel_high)
+    
+    # Correlate neural activity with velocity within low velocity group
+    pearson_r_low, pearson_p_low = stats.pearsonr(low_vel_neural, vel_low)
+    spearman_r_low, spearman_p_low = stats.spearmanr(low_vel_neural, vel_low)
+    
+    # Overall correlation (across both groups)
+    all_neural = np.concatenate([high_vel_neural, low_vel_neural])
+    all_vel = np.concatenate([vel_high, vel_low])
+    pearson_r_all, pearson_p_all = stats.pearsonr(all_neural, all_vel)
+    spearman_r_all, spearman_p_all = stats.spearmanr(all_neural, all_vel)
+    
+    results.append({
+        'SBP_Channel': channel,
+        'mean_high_vel': mean_neural_high[channel],
+        'mean_low_vel': mean_neural_low[channel],
+        'mean_diff': mean_neural_high[channel] - mean_neural_low[channel],
+        'pearson_r_overall': pearson_r_all,
+        'pearson_p_overall': pearson_p_all,
+        'spearman_r_overall': spearman_r_all,
+        'spearman_p_overall': spearman_p_all,
+        'pearson_r_high': pearson_r_high,
+        'pearson_p_high': pearson_p_high,
+        'pearson_r_low': pearson_r_low,
+        'pearson_p_low': pearson_p_low,
+        'spearman_r_high': spearman_r_high,
+        'spearman_p_high': spearman_p_high,
+        'spearman_r_low': spearman_r_low,
+        'spearman_p_low': spearman_p_low,
+        'pearson_sig_005': pearson_p_all < 0.05,
+        'pearson_sig_001': pearson_p_all < 0.01
+    })
+
+# Create DataFrame with results
+results_df = pd.DataFrame(results)
+
+# Add absolute correlation columns for ranking
+results_df['pearson_r_overall_abs'] = np.abs(results_df['pearson_r_overall'])
+results_df['spearman_r_overall_abs'] = np.abs(results_df['spearman_r_overall'])
+
+# Display summary statistics
+print("\n=== Summary Statistics ===")
+print(f"Total channels tested: {len(results_df)}")
+print(f"Significant overall correlation at p<0.05: {results_df['pearson_sig_005'].sum()}")
+print(f"Significant overall correlation at p<0.01: {results_df['pearson_sig_001'].sum()}")
+
+# Rank all channels by correlation magnitude (absolute value)
+results_df_sorted = results_df.sort_values('pearson_r_overall_abs', ascending=False)
+print("\n=== All Channels Ranked by Correlation Magnitude (Overall Pearson) ===")
+print(results_df_sorted[['SBP_Channel', 'pearson_r_overall', 'pearson_r_overall_abs', 'pearson_p_overall']])
+
+print("\n=== Analysis Complete ===")
