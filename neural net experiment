@@ -1,4 +1,21 @@
-import numpy as np
+# Create the figure
+fig, ax = plt.subplots(1, 1, figsize=(10, 6))
+
+# Plot each individual run with different colors
+colors = ['#2E86AB', '#A23B72', '#F18F01', '#C73E1D', '#6A994E']
+for i in range(n_runs):
+    ax.plot(n_channels_removed, all_r2_values[i, :], 'o-', 
+            linewidth=2, markersize=6, color=colors[i], 
+            label=f'Run {i+1}', alpha=0.8)
+
+# Calculate and show mean as dashed line
+ax.plot(n_channels_removed, mean_r2, '--', linewidth=2.5, 
+        color='black', label=f'Mean (all runs)', zorder=10, alpha=0.7)
+
+# Add baseline reference (from mean of first point)
+actual_baseline = mean_r2[0]
+ax.axhline(y=actual_baseline, color='r', linestyle=':', linewidth=2, 
+           label=f'Mean Baseline R² = {actual_baseline:.5import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow as tf
 from tensorflow import keras
@@ -8,14 +25,14 @@ from tensorflow.keras.callbacks import EarlyStopping
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import r2_score
 
-def create_gru_model(n_features, n_outputs=2, n_units=64, dropout_rate=0.2):
+def create_gru_model(n_features, n_outputs=2, n_units=128, dropout_rate=0.2):
     """
-    Create GRU model - using 64 units instead of 128 for speed
+    Create GRU model with better capacity for accuracy
     
     Args:
         n_features: Number of input features (channels * time bins)
         n_outputs: Number of output dimensions (2 for IDX and MRP velocity)
-        n_units: Number of GRU units (reduced for speed)
+        n_units: Number of GRU units (increased for better performance)
         dropout_rate: Dropout rate for regularization
     """
     model = Sequential([
@@ -29,28 +46,22 @@ def create_gru_model(n_features, n_outputs=2, n_units=64, dropout_rate=0.2):
 
 # Parameters
 hist = 6  # Time history bins
-n_runs = 5  # Reduced from 10 - fewer runs
+n_runs = 10  # Balanced for validity and speed
 
-# Faster training parameters
-epochs = 50  # Reduced from 100
-batch_size = 64  # Increased from 32 - larger batches train faster
-patience = 5  # Reduced from 10 - stop earlier
+# High-quality training parameters
+epochs = 100  # Increased from 50
+batch_size = 32  # Reduced from 64 for better gradients
+patience = 10  # Increased from 5 for better convergence
 
 # Get channels ranked from correlation analysis
 # For random: channels_list = np.arange(96)
 # For correlation-based: channels_list = results_df_sorted['SBP_Channel'].values.astype(int)
 
-print("Select removal strategy:")
-print("1. Correlation-based (remove lowest correlation first)")
-print("2. Random removal")
-strategy = input("Enter 1 or 2: ")
+# Get channels ranked from correlation analysis (lowest correlation removed first)
+channels_list = results_df_sorted['SBP_Channel'].values.astype(int)
+strategy_name = "Correlation-based"
 
-if strategy == "1":
-    channels_list = results_df_sorted['SBP_Channel'].values.astype(int)
-    strategy_name = "Correlation-based"
-else:
-    channels_list = np.arange(96)
-    strategy_name = "Random"
+print(f"Using {strategy_name} removal strategy (removing lowest correlation channels first)\n")
 
 # Store results for all runs
 all_r2_values = []
@@ -59,17 +70,13 @@ print(f"\nStarting GRU analysis with {n_runs} runs ({strategy_name})...\n")
 
 # Run the analysis n_runs times
 for run in range(n_runs):
-    if strategy == "2":
-        # Randomize for each run if using random strategy
-        np.random.seed(run)
-        channels_ranked = np.random.permutation(channels_list)
-    else:
-        channels_ranked = channels_list
+    # Use channels ranked by correlation (consistent across runs)
+    channels_ranked = channels_list
     
     r2_values_run = []
     
-    # Try removing 0, 20, 40, 60, 80 channels (step of 20 for speed)
-    for n_remove in range(0, 81, 20):
+    # Try removing 0, 10, 20, ... channels (finer resolution)
+    for n_remove in range(0, 91, 10):
         if n_remove == 0:
             keep_channels = channels_ranked
         else:
@@ -120,35 +127,32 @@ for run in range(n_runs):
         tf.keras.backend.clear_session()
     
     all_r2_values.append(r2_values_run)
-    print(f"Run {run+1}/{n_runs} complete - Final R²: {r2_values_run[-1]:.5f}")
+    print(f"Run {run+1}/{n_runs} complete - Baseline R² (96ch): {r2_values_run[0]:.5f}, Final R² (16ch): {r2_values_run[-1]:.5f}")
 
 print("\n" + "="*60)
 
 # Convert to numpy array
 all_r2_values = np.array(all_r2_values)
-n_channels_removed = list(range(0, 81, 20))
+n_channels_removed = list(range(0, 91, 10))
 mean_r2 = np.mean(all_r2_values, axis=0)
 std_r2 = np.std(all_r2_values, axis=0)
 
 # Create the figure
 fig, ax = plt.subplots(1, 1, figsize=(10, 6))
 
-# Plot individual runs
+# Plot each individual run with different colors
+colors = ['#2E86AB', '#A23B72', '#F18F01', '#C73E1D', '#6A994E', 
+          '#9B59B6', '#E67E22', '#1ABC9C', '#34495E', '#E74C3C']
+
 for i in range(n_runs):
-    ax.plot(n_channels_removed, all_r2_values[i, :], 
-            color='lightgray', alpha=0.3, linewidth=0.5)
+    ax.plot(n_channels_removed, all_r2_values[i, :], 'o-', 
+            linewidth=2, markersize=6, color=colors[i], 
+            label=f'Run {i+1}', alpha=0.8)
 
-# Plot mean
-ax.plot(n_channels_removed, mean_r2, 'o-', linewidth=2.5, markersize=8, 
-        color='#2E86AB', label=f'Mean R² (GRU, {n_runs} runs)', zorder=10)
-ax.fill_between(n_channels_removed, 
-                mean_r2 - std_r2, mean_r2 + std_r2,
-                alpha=0.3, color='#2E86AB', label='±1 SD')
-
-# Add baseline reference (calculated from actual GRU results with all channels)
+# Add baseline reference (from mean of all first points)
 actual_baseline = mean_r2[0]
-ax.axhline(y=actual_baseline, color='r', linestyle='--', linewidth=2, 
-           label=f'GRU Baseline R² = {actual_baseline:.5f}')
+ax.axhline(y=actual_baseline, color='gray', linestyle='--', linewidth=1.5, 
+           label=f'Mean Baseline R² = {actual_baseline:.5f}', alpha=0.7)
 
 # Add thresholds based on actual GRU baseline
 threshold_90 = actual_baseline * 0.90
