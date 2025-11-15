@@ -1,0 +1,191 @@
+# Create the figure
+fig, ax = plt.subplots(1, 1, figsize=(10, 6))
+
+# Plot each individual run with different colors
+colors = ['#2E86AB', '#A23B72', '#F18F01', '#C73E1D', '#6A994E']
+for i in range(n_runs):
+    ax.plot(n_channels_removed, all_r2_values[i, :], 'o-', 
+            linewidth=2, markersize=6, color=colors[i], 
+            label=f'Run {i+1}', alpha=0.8)
+
+# Calculate and show mean as dashed line
+ax.plot(n_channels_removed, mean_r2, '--', linewidth=2.5, 
+        color='black', label=f'Mean (all runs)', zorder=10, alpha=0.7)
+
+# Add baseline reference (from mean of first point)
+actual_baseline = mean_r2[0]
+ax.axhline(y=actual_baseline, color='r', linestyle=':', linewidth=2, 
+           label=f'Mean Baseline R² = {actual_baseline:.5import numpy as np
+import matplotlib.pyplot as plt
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import GRU, Dense, Dropout
+from tensorflow.keras.callbacks import EarlyStopping
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import r2_score
+
+def create_gru_model(n_features, n_outputs=2, n_units=128, dropout_rate=0.2):
+    """
+    Create GRU model with better capacity for accuracy
+    
+    Args:
+        n_features: Number of input features (channels * time bins)
+        n_outputs: Number of output dimensions (2 for IDX and MRP velocity)
+        n_units: Number of GRU units (increased for better performance)
+        dropout_rate: Dropout rate for regularization
+    """
+    model = Sequential([
+        GRU(n_units, input_shape=(None, n_features), return_sequences=False),
+        Dropout(dropout_rate),
+        Dense(n_outputs)
+    ])
+    
+    model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+    return model
+
+# Parameters
+hist = 6  # Time history bins
+n_runs = 10  # Balanced for validity and speed
+
+# High-quality training parameters
+epochs = 100  # Increased from 50
+batch_size = 32  # Reduced from 64 for better gradients
+patience = 10  # Increased from 5 for better convergence
+
+# Get channels ranked from correlation analysis
+# For random: channels_list = np.arange(96)
+# For correlation-based: channels_list = results_df_sorted['SBP_Channel'].values.astype(int)
+
+# Get channels ranked from correlation analysis (lowest correlation removed first)
+channels_list = results_df_sorted['SBP_Channel'].values.astype(int)
+strategy_name = "Correlation-based"
+
+print(f"Using {strategy_name} removal strategy (removing lowest correlation channels first)\n")
+
+# Store results for all runs
+all_r2_values = []
+
+print(f"\nStarting GRU analysis with {n_runs} runs ({strategy_name})...\n")
+
+# Run the analysis n_runs times
+for run in range(n_runs):
+    # Use channels ranked by correlation (consistent across runs)
+    channels_ranked = channels_list
+    
+    r2_values_run = []
+    
+    # Try removing 0, 10, 20, ... channels (finer resolution)
+    for n_remove in range(0, 91, 10):
+        if n_remove == 0:
+            keep_channels = channels_ranked
+        else:
+            keep_channels = channels_ranked[:-n_remove]
+        
+        # Filter neural data
+        neu_filtered = neu[:, keep_channels]
+        
+        # Create sequences for GRU (samples, timesteps, features)
+        # Each sample has 'hist+1' timesteps
+        n_samples = neu_filtered.shape[0] - hist
+        X = np.zeros((n_samples, hist+1, len(keep_channels)))
+        for h in range(hist+1):
+            X[:, h, :] = neu_filtered[h:h+n_samples, :]
+        y = vel[hist:, :]
+        
+        # Train/test split
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, shuffle=False
+        )
+        
+        # Create and train GRU model
+        model = create_gru_model(n_features=len(keep_channels), n_outputs=2)
+        
+        # Early stopping to prevent overfitting
+        early_stop = EarlyStopping(monitor='val_loss', patience=patience, 
+                                    restore_best_weights=True)
+        
+        # Train (with progress)
+        print(f"  Training with {len(keep_channels)} channels ({n_remove} removed)...", end=' ', flush=True)
+        history = model.fit(
+            X_train, y_train,
+            validation_split=0.2,
+            epochs=epochs,
+            batch_size=batch_size,
+            callbacks=[early_stop],
+            verbose=0
+        )
+        print(f"Done (epochs: {len(history.history['loss'])})", flush=True)
+        
+        # Predict and calculate R²
+        yhat = model.predict(X_test, verbose=0)
+        r2 = r2_score(y_test, yhat)
+        
+        r2_values_run.append(r2)
+        
+        # Clear session to free memory
+        tf.keras.backend.clear_session()
+    
+    all_r2_values.append(r2_values_run)
+    print(f"Run {run+1}/{n_runs} complete - Baseline R² (96ch): {r2_values_run[0]:.5f}, Final R² (16ch): {r2_values_run[-1]:.5f}")
+
+print("\n" + "="*60)
+
+# Convert to numpy array
+all_r2_values = np.array(all_r2_values)
+n_channels_removed = list(range(0, 91, 10))
+mean_r2 = np.mean(all_r2_values, axis=0)
+std_r2 = np.std(all_r2_values, axis=0)
+
+# Create the figure
+fig, ax = plt.subplots(1, 1, figsize=(10, 6))
+
+# Plot each individual run with different colors
+colors = ['#2E86AB', '#A23B72', '#F18F01', '#C73E1D', '#6A994E', 
+          '#9B59B6', '#E67E22', '#1ABC9C', '#34495E', '#E74C3C']
+
+for i in range(n_runs):
+    ax.plot(n_channels_removed, all_r2_values[i, :], 'o-', 
+            linewidth=2, markersize=6, color=colors[i], 
+            label=f'Run {i+1}', alpha=0.8)
+
+# Add baseline reference (from mean of all first points)
+actual_baseline = mean_r2[0]
+ax.axhline(y=actual_baseline, color='gray', linestyle='--', linewidth=1.5, 
+           label=f'Mean Baseline R² = {actual_baseline:.5f}', alpha=0.7)
+
+# Add thresholds based on actual GRU baseline
+threshold_90 = actual_baseline * 0.90
+threshold_95 = actual_baseline * 0.95
+ax.axhline(y=threshold_90, color='orange', linestyle=':', linewidth=1.5, 
+           label=f'90% threshold = {threshold_90:.5f}')
+ax.axhline(y=threshold_95, color='green', linestyle=':', linewidth=1.5, 
+           label=f'95% threshold = {threshold_95:.5f}')
+
+# Labels
+ax.set_xlabel(f'Number of Channels Removed ({strategy_name})', fontsize=12)
+ax.set_ylabel('R² Value', fontsize=12)
+ax.set_title(f'GRU Model Performance vs Channel Reduction ({strategy_name})', 
+             fontsize=14, fontweight='bold')
+ax.grid(True, alpha=0.3)
+ax.legend(loc='best', fontsize=10)
+
+plt.tight_layout()
+plt.show()
+
+# Print summary
+print("\n=== Summary (GRU Model) ===")
+print(f"Strategy: {strategy_name}")
+print(f"GRU Baseline R² (all 96 channels): {actual_baseline:.5f} ± {std_r2[0]:.5f}")
+print(f"Ridge Baseline R² (for comparison): 0.32049")
+print(f"GRU improvement over Ridge: {(actual_baseline - 0.32049):.5f} ({((actual_baseline/0.32049 - 1)*100):.1f}%)")
+print(f"\nBest mean R²: {np.max(mean_r2):.5f} ({n_channels_removed[np.argmax(mean_r2)]} channels removed)")
+print(f"Worst mean R²: {np.min(mean_r2):.5f} ({n_channels_removed[np.argmin(mean_r2)]} channels removed)")
+
+# Find optimal removal
+for threshold_name, threshold_val in [("95%", threshold_95), ("90%", threshold_90)]:
+    valid_indices = [i for i, r2 in enumerate(mean_r2) if r2 >= threshold_val]
+    if valid_indices:
+        max_removable = n_channels_removed[valid_indices[-1]]
+        remaining = 96 - max_removable
+        print(f"Can remove up to {max_removable} channels (keep {remaining}) while staying above {threshold_name} threshold")
